@@ -27,4 +27,13 @@ tlds.json: tld-json-files
 	jq -cs '{tlds:.}' tld-json/*.json > "$@"
 
 tlds.json.gz: tlds.json
-	gzip -k "$<"
+	gzip -kf "$<"
+
+gh-pages: tlds.json.gz
+	git branch -d gh-pages || true
+	git checkout --orphan gh-pages
+	git rm --cached -r .
+	git add -f tlds.json tlds.json.gz index.xhtml
+	git commit -m Auto
+	git push -u origin gh-pages --force
+	git checkout -f master
