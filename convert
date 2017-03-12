@@ -1,0 +1,85 @@
+#!/bin/bash
+set -e
+
+IN="$1"
+[ -z "$IN" ] && { echo >&2 Usage: "$0" '<input-html-file>'; exit 2; }
+
+section() {
+  local sec="$1"
+  cat "$IN" | grep -A9999 "$sec" | tail -n +2 | grep -B9999 -m1 '<h2>' | head --lines=-1 | sed 's#<br \?/>#\n#g' | sed 's#<[^>]\+>##g' | sed 's#^\s*##g' | grep -E '...'
+}
+
+section_email() {
+  local data="$1"
+  echo "$data" | grep -Eo '[^ ]+@[a-zA-Z0-9.-]+'
+}
+
+xx() {
+  local secName="$1"
+  local data="$(section "$secName")"
+  local email="$(section_email "$data")"
+  data="$(echo "$data" | grep -Ev '[^ ]+@[a-zA-Z0-9.]+')"
+  local phone="$(echo "$data" | grep 'Voice:' | grep -Eo '\+[0-9.]+( [0-9.]+)*')"
+  data="$(echo "$data" | grep -Ev 'Voice:')"
+  local fax="$(echo "$data" | grep 'Fax:' | grep -Eo '\+[0-9.]+( [0-9.]+)*')"
+  data="$(echo "$data" | grep -Ev 'Fax:')"
+  jq -s '.[0] * .[1] * .[2] * .[3]' \
+    <(echo "$email" | jq -Rs '{email:.|rtrimstr("\n")}') \
+    <(echo "$phone" | tr -d '.' | tr -d ' ' | jq -Rs '{e164Voice:.|rtrimstr("\n")}') \
+    <(echo "$fax" | tr -d '.' | tr -d ' ' | jq -Rs '{e164Fax:.|rtrimstr("\n")}') \
+    <(echo "$data" | jq -Rs '{address:.|rtrimstr("\n")}')
+}
+
+UTLD="$(cat "$IN" | grep 'Delegation Record for .' | sed 's#<span class="force-rtl">##g' | sed 's/^.*Delegation Record for \.\([^ <]\+\).*$/\1/' | tr '[:upper:]' '[:lower:]')"
+ATLD="$(idn -a "$UTLD")"
+WHOIS="$(cat "$IN" | grep 'WHOIS Server:' | sed 's#^.*WHOIS Server:</b> \([^ ]*\)\s*$#\1#')"
+if [ ${#ATLD} == 2 ]; then
+  DOMAINTYPE="ccTLD"
+elif grep -Eq 'IDN designated for two-letter country code' "$IN"; then
+  DOMAINTYPE="ccTLD"
+elif grep -Eq 'Test top-level domain' "$IN"; then
+  DOMAINTYPE="testTLD"
+elif grep -Eq 'Generic top-level domain' "$IN"; then
+  DOMAINTYPE="gTLD"
+elif grep -Eq 'Restricted generic top-level domain' "$IN"; then
+  DOMAINTYPE="restrictedgTLD"
+elif grep -Eq 'Infrastructure top-level domain' "$IN"; then
+  DOMAINTYPE="infrastructureTLD"
+elif grep -Eq 'Sponsored top-level domain' "$IN"; then
+  DOMAINTYPE="sponsoredTLD"
+else
+  echo >&2 Unknown TLD type for "$ATLD"
+  exit 2
+  #DOMAINTYPE="$(cat "$IN" | grep -E '<p>\([^)]+ domain\)</p>' | grep -Eo '[^()]+ domain')"
+fi
+
+REGSVC="$(cat "$IN" | grep -E 'URL for registration services:' | sed 's#^.*URL for registration services:</b> <a href="\([^"]*\)".*$#\1#')"
+REGDATE="$(cat "$IN" | grep -E 'Registration date [0-9]{4}-[0-9]{2}-[0-9]{2}' | sed 's#^.*Registration date \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\).*$#\1#')"
+LASTUPDATE="$(cat "$IN" | grep -E 'Record last updated [0-9]{4}-[0-9]{2}-[0-9]{2}' | sed 's#^.*Record last updated \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\).*$#\1#')"
+
+
+jq -s '.[0] * .[1] * .[2] * .[3] * .[4] * .[5] * .[6] * .[7] * .[8] * .[9] * .[10]' \
+  <(section "Sponsoring Organisation" | jq -Rs '{sponsor:.|rtrimstr("\n")}') \
+  <(xx "Administrative Contact" | jq '{admin:.}') \
+  <(xx "Technical Contact" | jq '{tech:.}') \
+  <(echo "$ATLD" | jq -Rs '{aName:.|rtrimstr("\n")}') \
+  <(echo "$UTLD" | jq -Rs '{uName:.|rtrimstr("\n")}') \
+  <(echo "$WHOIS" | jq -Rs '{whois:.|rtrimstr("\n")}') \
+  <(echo "$DOMAINTYPE" | jq -Rs '{type:.|rtrimstr("\n")}') \
+  <(echo "$REGSVC" | jq -Rs '{registrationServiceURL:.|rtrimstr("\n")}') \
+  <(echo "$REGDATE" | jq -Rs '{registrationDate:.|rtrimstr("\n")}') \
+  <(echo "$LASTUPDATE" | jq -Rs '{lastUpdate:.|rtrimstr("\n")}') \
+  <(cat "$IN" | grep -A9999 'Name Servers' | tail -n +2 | grep -B9999 -m1 '<h2>' | grep -A9999 ' <tr>' | grep -B9999 '</tbody>' | head --lines=-1 | grep -E '[a-z0-9]' | sed 's#</tr>#\r#g' | tr '\n' '\t' | tr '\r' '\n' | sed 's#</\?[tb][rd]/\?># #g' | sed 's#\s\+# #g' | sed 's#^\s\+##g' | sed 's#\s\+$##g' | jq -Rs '{nameservers:.|rtrimstr("\n")|split("\n")|map({name: .|split(" ")[0], addr: .|split(" ")[1:]})}')
+
+
+#ADMIN="$(section "Administrative Contact")"
+#ADMIN_EMAIL="$(section_email "$ADMIN")"
+#echo $ADMIN_EMAIL | jq -Rs '{admin:{email:.}}' > x.0
+#echo "$ADMIN" | grep -Ev '[^ ]+@[a-zA-Z0-9.]+' | jq -Rs '{admin:{address:.}}' > x.1
+#jq -s '.[0] * .[1]' x.0 x.1
+#echo
+#echo TECHNICAL_CONTACT
+#TECH="$(section "Technical Contact")"
+#TECH_EMAIL="$(section_email "$TECH")"
+#echo $TECH_EMAIL
+#echo "$TECH" | grep -Ev '[^ ]+@[a-zA-Z0-9.]+' | jq -Rs '.'
