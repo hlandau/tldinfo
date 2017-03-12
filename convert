@@ -6,7 +6,7 @@ IN="$1"
 
 section() {
   local sec="$1"
-  cat "$IN" | grep -A9999 "$sec" | tail -n +2 | grep -B9999 -m1 '<h2>' | head --lines=-1 | sed 's#<br \?/>#\n#g' | sed 's#<[^>]\+>##g' | sed 's#^\s*##g' | grep -E '...'
+  cat "$IN" | grep -A9999 "$sec" | tail -n +2 | grep -B9999 -m1 '<h2>' | head --lines=-1 | sed 's#<br \?/>#\n#g' | sed 's#<[^>]\+>##g' | sed 's#^\s*##g' | grep -E '...' | recode html..utf8
 }
 
 section_email() {
@@ -14,7 +14,7 @@ section_email() {
   echo "$data" | grep -Eo '[^ ]+@[a-zA-Z0-9.-]+'
 }
 
-xx() {
+xsection() {
   local secName="$1"
   local data="$(section "$secName")"
   local email="$(section_email "$data")"
@@ -60,8 +60,8 @@ LASTUPDATE="$(cat "$IN" | grep -E 'Record last updated [0-9]{4}-[0-9]{2}-[0-9]{2
 
 jq -s '.[0] * .[1] * .[2] * .[3] * .[4] * .[5] * .[6] * .[7] * .[8] * .[9] * .[10]' \
   <(section "Sponsoring Organisation" | jq -Rs '{sponsor:.|rtrimstr("\n")}') \
-  <(xx "Administrative Contact" | jq '{admin:.}') \
-  <(xx "Technical Contact" | jq '{tech:.}') \
+  <(xsection "Administrative Contact" | jq '{admin:.}') \
+  <(xsection "Technical Contact" | jq '{tech:.}') \
   <(echo "$ATLD" | jq -Rs '{aName:.|rtrimstr("\n")}') \
   <(echo "$UTLD" | jq -Rs '{uName:.|rtrimstr("\n")}') \
   <(echo "$WHOIS" | jq -Rs '{whois:.|rtrimstr("\n")}') \
